@@ -2,11 +2,12 @@ import { useState } from 'react';
 
 const PROMPT = `请帮我将当前项目注册到 LocalServiceHub（运行在 http://localhost:9900）。
 
-步骤：
-1. 读取当前项目的 package.json、配置文件，分析项目类型
-2. 确定启动命令（如 npm run dev、python -m uvicorn main:app --port 8000）
-3. 确定项目占用的端口号
-4. 执行以下 curl 命令完成注册：
+1. 分析当前项目结构，判断项目类型、启动命令和端口。
+2. startCommand 使用结构化格式；前后端分离项目用数组；projectDir 填项目根目录，cwd 可指向子目录；不要把整条命令写进 cmd，也不要使用 /bin/bash、bash、sh、zsh、fish、osascript 或 /bin/bash -lc。复杂启动逻辑请写成项目内脚本后注册，例如 {"cmd":"./scripts/start-backend.sh","args":[],"cwd":"<项目根目录>"}。
+3. 虚拟环境 Python 可使用项目内 .venv/bin/python 的绝对路径。
+4. 注册后调用 /api/projects 和 /api/services 验证结果。
+
+执行注册：
 
 curl -X POST http://localhost:9900/api/projects/register \\
   -H 'Content-Type: application/json' \\
@@ -14,18 +15,13 @@ curl -X POST http://localhost:9900/api/projects/register \\
     "name": "<项目名>",
     "description": "<一句话描述>",
     "projectDir": "<项目绝对路径>",
-    "startCommand": {"cmd":"<命令>","args":["<参数>"],"cwd":"<工作目录>"},
-    "ports": [<端口号>]
+    "startCommand": [
+      {"cmd":"<后端命令>","args":["<参数>"],"cwd":"<后端目录>"},
+      {"cmd":"<前端命令>","args":["<参数>"],"cwd":"<前端目录>"}
+    ],
+    "ports": [<后端端口>, <前端端口>]
   }'
-
-如果是前后端分离项目，startCommand 用数组：
-"startCommand": [
-  {"cmd":"npm","args":["run","dev"],"cwd":"<前端目录>"},
-  {"cmd":"python3","args":["-m","uvicorn","main:app","--port","8000"],"cwd":"<后端目录>"}
-]
-
-如果后端需要虚拟环境，cmd 用 venv 里的 python 绝对路径：
-{"cmd":"/path/to/.venv/bin/python","args":["-m","uvicorn","main:app","--port","8000"],"cwd":"<后端目录>"}`;
+`;
 
 export default function RegisterPromptModal({ onClose }) {
   const [copied, setCopied] = useState(false);

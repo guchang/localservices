@@ -1,5 +1,5 @@
-import { spawn } from 'child_process';
-import { mkdirSync, createWriteStream, existsSync } from 'fs';
+import { execFileSync, spawn } from 'child_process';
+import { closeSync, existsSync, mkdirSync, openSync } from 'fs';
 import { join } from 'path';
 import config from '../../config.js';
 
@@ -21,24 +21,24 @@ export class ProcessManager {
     const pids = [];
 
     for (const cmd of cmds) {
-      const logStream = createWriteStream(join(this.#logDir, `${serviceId}.log`), { flags: 'a' });
-      const child = spawn(cmd.cmd, cmd.args, {
+      const logPath = join(this.#logDir, `${serviceId}.log`);
+      const stdoutFd = openSync(logPath, 'a');
+      const stderrFd = openSync(logPath, 'a');
+      const child = spawn(cmd.cmd, Array.isArray(cmd.args) ? cmd.args : [], {
         cwd: cmd.cwd,
         detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['ignore', stdoutFd, stderrFd],
         env: { ...process.env, FORCE_COLOR: '1' },
       });
-      child.stdout.pipe(logStream);
-      child.stderr.pipe(logStream);
-      child.on('close', () => logStream.close());
+      closeSync(stdoutFd);
+      closeSync(stderrFd);
       child.unref();
 
       const pid = child.pid;
-      pids.push(pid);
+      if (pid) pids.push(pid);
 
       child.on('error', (err) => {
         console.error(`Process ${pid} error:`, err.message);
-        logStream.close();
       });
     }
 
@@ -48,7 +48,9 @@ export class ProcessManager {
   }
 
   async stop(serviceId, pids) {
-    const pidList = Array.isArray(pids) ? pids : [pids];
+    const spawnedPids = this.#spawned.get(serviceId)?.pids || [];
+    const requestedPids = Array.isArray(pids) ? pids : [pids];
+    const pidList = [...new Set([...spawnedPids, ...requestedPids])];
     const kills = pidList.filter(Boolean).map(pid => this.#killProcess(pid));
     await Promise.all(kills);
     this.#spawned.delete(serviceId);
@@ -79,27 +81,54 @@ export class ProcessManager {
 
   #killProcess(pid) {
     return new Promise((resolve) => {
+      const pgid = this.#getProcessGroupId(pid);
+      const targets = [...new Set([pgid ? -pgid : -pid, pid])];
       try {
-        process.kill(pid, 'SIGTERM');
+        process.kill(targets[0], 'SIGTERM');
       } catch {
-        resolve();
-        return;
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch {
+          resolve();
+          return;
+        }
       }
 
       const timeout = setTimeout(() => {
-        try { process.kill(pid, 'SIGKILL'); } catch {}
+        for (const target of targets) {
+          try { process.kill(target, 'SIGKILL'); } catch {}
+        }
         resolve();
       }, STOP_TIMEOUT);
 
       const check = setInterval(() => {
-        try {
-          process.kill(pid, 0);
-        } catch {
+        const alive = targets.some(target => {
+          try {
+            process.kill(target, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (!alive) {
           clearInterval(check);
           clearTimeout(timeout);
           resolve();
         }
       }, 200);
     });
+  }
+
+  #getProcessGroupId(pid) {
+    try {
+      const output = execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'ignore'],
+      }).trim();
+      const pgid = parseInt(output, 10);
+      return Number.isNaN(pgid) ? null : pgid;
+    } catch {
+      return null;
+    }
   }
 }
