@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { mkdirSync, openSync, existsSync } from 'fs';
+import { mkdirSync, createWriteStream, existsSync } from 'fs';
 import { join } from 'path';
 import config from '../../config.js';
 
@@ -21,13 +21,16 @@ export class ProcessManager {
     const pids = [];
 
     for (const cmd of cmds) {
-      const logFd = openSync(join(this.#logDir, `${serviceId}.log`), 'a');
+      const logStream = createWriteStream(join(this.#logDir, `${serviceId}.log`), { flags: 'a' });
       const child = spawn(cmd.cmd, cmd.args, {
         cwd: cmd.cwd,
         detached: true,
-        stdio: ['ignore', logFd, logFd],
+        stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, FORCE_COLOR: '1' },
       });
+      child.stdout.pipe(logStream);
+      child.stderr.pipe(logStream);
+      child.on('close', () => logStream.close());
       child.unref();
 
       const pid = child.pid;
@@ -35,6 +38,7 @@ export class ProcessManager {
 
       child.on('error', (err) => {
         console.error(`Process ${pid} error:`, err.message);
+        logStream.close();
       });
     }
 

@@ -1,4 +1,32 @@
+import { existsSync } from 'fs';
+import { resolve } from 'path';
+import { loadSettings, saveSettings } from '../settings.js';
+
+const SAFE_COMMANDS = new Set(['npm', 'npx', 'yarn', 'pnpm', 'bun', 'node', 'python', 'python3', 'deno']);
+
+function validateStartCommand(cmd) {
+  if (!cmd) return true;
+  const cmds = Array.isArray(cmd) ? cmd : [cmd];
+  return cmds.every(c => SAFE_COMMANDS.has(c.cmd));
+}
+
 export function registerRoutes(app, monitor, processManager) {
+  app.get('/api/settings', (req, res) => {
+    res.json(loadSettings());
+  });
+
+  app.post('/api/settings', async (req, res) => {
+    const { projectRoots } = req.body;
+    const settings = saveSettings({
+      projectRoots: projectRoots || [],
+      initialized: true,
+    });
+    const registry = monitor.getRegistry();
+    await registry.autoDiscover(settings.projectRoots);
+    const result = await monitor.triggerScan();
+    res.json({ settings, services: result });
+  });
+
   app.get('/api/services', (req, res) => {
     res.json(monitor.getServices());
   });
@@ -25,9 +53,16 @@ export function registerRoutes(app, monitor, processManager) {
     if (!name || !projectDir) {
       return res.status(400).json({ error: 'name and projectDir are required' });
     }
-    const id = projectDir.split('/').filter(Boolean).pop().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const absDir = resolve(projectDir);
+    if (!existsSync(absDir)) {
+      return res.status(400).json({ error: '项目目录不存在' });
+    }
+    if (!validateStartCommand(startCommand)) {
+      return res.status(400).json({ error: '启动命令不在允许列表中' });
+    }
+    const id = absDir.split('/').filter(Boolean).pop().toLowerCase().replace(/[^a-z0-9]+/g, '-');
     const project = registry.add({
-      id, name, projectDir,
+      id, name, projectDir: absDir,
       expectedPorts: expectedPorts || [],
       framework: framework || 'unknown',
       startCommand: startCommand || null,
@@ -42,9 +77,17 @@ export function registerRoutes(app, monitor, processManager) {
     res.json({ removed });
   });
 
-  app.post('/api/projects/discover', async (req, res) => {
+  app.patch('/api/projects/:id', (req, res) => {
     const registry = monitor.getRegistry();
-    await registry.autoDiscover();
+    const updated = registry.update(req.params.id, req.body);
+    if (!updated) return res.status(404).json({ error: '项目不存在' });
+    res.json(updated);
+  });
+
+  app.post('/api/projects/discover', async (req, res) => {
+    const settings = loadSettings();
+    const registry = monitor.getRegistry();
+    await registry.autoDiscover(settings.projectRoots);
     res.json(registry.getAll());
   });
 

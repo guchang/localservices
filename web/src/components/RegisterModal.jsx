@@ -2,17 +2,23 @@ import { useState } from 'react';
 
 export default function RegisterModal({ onClose, onSubmit }) {
   const [form, setForm] = useState({ name: '', projectDir: '', expectedPorts: '', framework: '', startCommand: '' });
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSubmit({
-      name: form.name,
-      projectDir: form.projectDir,
-      expectedPorts: form.expectedPorts.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)),
-      framework: form.framework || 'unknown',
-      startCommand: form.startCommand || null,
-    });
-    onClose();
+    setSubmitting(true);
+    try {
+      await onSubmit({
+        name: form.name,
+        projectDir: form.projectDir,
+        expectedPorts: form.expectedPorts.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n)),
+        framework: form.framework || 'unknown',
+        startCommand: form.startCommand || null,
+      });
+      onClose();
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -54,7 +60,9 @@ export default function RegisterModal({ onClose, onSubmit }) {
           />
           <div className="modal-actions">
             <button type="button" className="btn" onClick={onClose}>取消</button>
-            <button type="submit" className="btn primary">注册</button>
+            <button type="submit" className="btn primary" disabled={submitting}>
+              {submitting ? '注册中...' : '注册'}
+            </button>
           </div>
         </form>
       </div>

@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { WebSocketServer } from 'ws';
 import { ProjectRegistry } from '../matcher/project-registry.js';
 import { ProjectMatcher } from '../matcher/project-matcher.js';
+import { loadSettings } from '../settings.js';
 import config from '../../config.js';
 
 export class ServiceMonitor extends EventEmitter {
@@ -58,7 +59,8 @@ export class ServiceMonitor extends EventEmitter {
   }
 
   async triggerScan() {
-    await this.#registry.autoDiscover();
+    const settings = loadSettings();
+    await this.#registry.autoDiscover(settings.projectRoots);
     this.#tick();
     return this.getServices();
   }

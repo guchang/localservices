@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import ServiceCard from './ServiceCard.jsx';
 import RegisterModal from './RegisterModal.jsx';
+import SettingsModal from './SettingsModal.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
 
 export default function Dashboard() {
   const [services, setServices] = useState([]);
   const [summary, setSummary] = useState({ total: 0, online: 0, offline: 0 });
   const [scanning, setScanning] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [initialized, setInitialized] = useState(null);
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
   const { subscribe } = useWebSocket(wsUrl);
@@ -22,6 +26,14 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(s => {
+        setInitialized(s.initialized === true);
+        if (!s.initialized) setShowSettings(true);
+      })
+      .catch(() => {});
+
     fetchServices();
     const unsub = subscribe((msg) => {
       if (msg.type === 'full_state') {
@@ -47,17 +59,40 @@ export default function Dashboard() {
   };
 
   const handleRegister = async (project) => {
-    await fetch('/api/projects', {
+    const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(project),
     });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || '注册失败');
+    }
     fetchServices();
   };
 
   const handleDiscover = async () => {
-    await fetch('/api/projects/discover', { method: 'POST' });
-    fetchServices();
+    setDiscovering(true);
+    try {
+      await fetch('/api/projects/discover', { method: 'POST' });
+      await fetchServices();
+    } finally {
+      setDiscovering(false);
+    }
+  };
+
+  const handleSaveSettings = async ({ projectRoots }) => {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectRoots }),
+    });
+    if (!res.ok) throw new Error('保存设置失败');
+    const data = await res.json();
+    setInitialized(true);
+    setShowSettings(false);
+    setServices(data.services?.services || []);
+    setSummary(data.services?.summary || { total: 0, online: 0, offline: 0 });
   };
 
   const online = services.filter(s => s.status === 'online');
@@ -101,7 +136,10 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="header-actions">
-          <button className="btn" onClick={handleDiscover}>重新发现</button>
+          <button className="btn" onClick={() => setShowSettings(true)}>设置</button>
+          <button className="btn" onClick={handleDiscover} disabled={discovering}>
+            {discovering ? '发现中...' : '重新发现'}
+          </button>
           <button className="btn" onClick={() => setShowRegister(true)}>注册项目</button>
           <button className="btn primary" onClick={handleScan} disabled={scanning}>
             {scanning ? '扫描中...' : '立即扫描'}
@@ -129,12 +167,20 @@ export default function Dashboard() {
 
       {services.length === 0 && (
         <div className="empty">
-          <p>未发现服务。点击"重新发现"扫描项目目录，或点击"注册项目"手动添加。</p>
+          <p>未发现服务。点击「设置」配置扫描目录，或点击「注册项目」手动添加。</p>
         </div>
       )}
 
       {showRegister && (
         <RegisterModal onClose={() => setShowRegister(false)} onSubmit={handleRegister} />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          onClose={() => { setShowSettings(false); setInitialized(true); }}
+          onSave={handleSaveSettings}
+          isOnboarding={initialized === false}
+        />
       )}
     </div>
   );

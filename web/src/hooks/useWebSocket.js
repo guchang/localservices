@@ -4,6 +4,7 @@ export function useWebSocket(url) {
   const wsRef = useRef(null);
   const [connected, setConnected] = useState(false);
   const listenersRef = useRef(new Set());
+  const cleanedRef = useRef(false);
 
   const connect = useCallback(() => {
     const ws = new WebSocket(url);
@@ -12,7 +13,9 @@ export function useWebSocket(url) {
     ws.onopen = () => setConnected(true);
     ws.onclose = () => {
       setConnected(false);
-      setTimeout(connect, 3000);
+      if (!cleanedRef.current) {
+        setTimeout(connect, 3000);
+      }
     };
     ws.onerror = () => ws.close();
 
@@ -25,8 +28,12 @@ export function useWebSocket(url) {
   }, [url]);
 
   useEffect(() => {
+    cleanedRef.current = false;
     connect();
-    return () => wsRef.current?.close();
+    return () => {
+      cleanedRef.current = true;
+      wsRef.current?.close();
+    };
   }, [connect]);
 
   const subscribe = useCallback((fn) => {

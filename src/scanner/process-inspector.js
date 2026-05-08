@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
 
@@ -15,9 +15,10 @@ export function getProcessDetails(pid) {
   let command = null;
 
   try {
-    const lsofOutput = execSync(`/usr/sbin/lsof -p ${pid} 2>/dev/null`, {
+    const lsofOutput = execFileSync('lsof', ['-p', String(pid)], {
       encoding: 'utf-8',
       maxBuffer: 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'ignore'],
     });
 
     for (const line of lsofOutput.split('\n')) {
@@ -29,10 +30,10 @@ export function getProcessDetails(pid) {
   } catch {}
 
   try {
-    const psOutput = execSync(`/bin/ps -o command= -p ${pid} 2>/dev/null`, {
+    command = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], {
       encoding: 'utf-8',
-    });
-    command = psOutput.trim();
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
   } catch {}
 
   const framework = detectFramework(command, cwd);

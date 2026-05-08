@@ -3,7 +3,7 @@ import { getBatchProcessDetails } from '../scanner/process-inspector.js';
 
 const FRONTEND_FRAMEWORKS = new Set(['vite', 'next', 'react', 'vue', 'angular', 'nuxt', 'svelte', 'gatsby', 'tauri']);
 const BACKEND_FRAMEWORKS = new Set(['express', 'koa', 'hapi', 'flask', 'django', 'fastapi', 'python-uvicorn', 'python-flask', 'gunicorn', 'spring']);
-const SUBPROJECT_DIRS = new Set(['frontend', 'backend', 'web', 'server', 'client', 'api', 'app']);
+const SUBPROJECT_DIRS = new Set(['frontend', 'backend', 'web', 'client']);
 
 function classifyRole(framework) {
   if (FRONTEND_FRAMEWORKS.has(framework)) return 'frontend';
@@ -11,12 +11,17 @@ function classifyRole(framework) {
   return 'unknown';
 }
 
-function normalizeCwd(cwd) {
+function normalizeCwd(cwd, projectDirs) {
   if (!cwd) return null;
   const parts = cwd.split('/');
   const last = parts[parts.length - 1]?.toLowerCase();
   if (SUBPROJECT_DIRS.has(last)) {
     return parts.slice(0, -1).join('/');
+  }
+  // If CWD is a direct subdirectory of a known project, group with parent
+  const parent = parts.slice(0, -1).join('/');
+  if (projectDirs.has(parent)) {
+    return parent;
   }
   return cwd;
 }
@@ -44,8 +49,9 @@ export class ProjectMatcher {
     }
 
     const groups = new Map();
+    const projectDirs = new Set(this.#registry.getAll().map(p => p.projectDir));
     for (const entry of portEntries) {
-      const key = normalizeCwd(entry.details?.cwd) || `port-${entry.port}`;
+      const key = normalizeCwd(entry.details?.cwd, projectDirs) || `port-${entry.port}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(entry);
     }
@@ -101,7 +107,7 @@ export class ProjectMatcher {
 
     for (const project of this.#registry.getAll()) {
       for (const key of groups.keys()) {
-        if (key.startsWith(project.projectDir) && key !== project.projectDir) {
+        if (key.startsWith(project.projectDir + '/')) {
           usedProjectIds.add(project.id);
         }
       }
@@ -143,7 +149,7 @@ export class ProjectMatcher {
     for (const entry of entries) {
       const project = this.#matchProject(entry.port, entry.details);
       if (!project) continue;
-      if (project.projectDir.startsWith(groupKey) || groupKey === project.projectDir) {
+      if (groupKey === project.projectDir || project.projectDir.startsWith(groupKey + '/')) {
         if (!best || project.projectDir.length > best.projectDir.length) {
           best = project;
         }

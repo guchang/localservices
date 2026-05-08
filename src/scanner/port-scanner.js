@@ -1,10 +1,11 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import config from '../../config.js';
 
 export function scanPorts() {
-  const output = execSync('/usr/sbin/lsof -i -P -n 2>/dev/null', {
+  const output = execFileSync('lsof', ['-i', '-P', '-n'], {
     encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
+    stdio: ['pipe', 'pipe', 'ignore'],
   });
 
   const ports = new Map();

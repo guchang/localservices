@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join, basename } from 'path';
 import { readdirSync } from 'fs';
 import config from '../../config.js';
+import { loadSettings } from '../settings.js';
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', 'dist', 'build', '__pycache__',
@@ -14,14 +15,19 @@ export class ProjectRegistry {
   #projects = new Map();
 
   async init() {
+    const settings = loadSettings();
     if (existsSync(PROJECTS_FILE)) {
-      const data = JSON.parse(readFileSync(PROJECTS_FILE, 'utf-8'));
-      for (const p of data) {
-        this.#projects.set(p.id, p);
+      try {
+        const data = JSON.parse(readFileSync(PROJECTS_FILE, 'utf-8'));
+        for (const p of data) {
+          this.#projects.set(p.id, p);
+        }
+        this.#backfillStartCommands();
+      } catch {
+        this.#save();
       }
-      this.#backfillStartCommands();
-    } else {
-      await this.autoDiscover();
+    } else if (settings.projectRoots?.length) {
+      await this.autoDiscover(settings.projectRoots);
     }
   }
 
@@ -73,8 +79,9 @@ export class ProjectRegistry {
     return deleted;
   }
 
-  async autoDiscover() {
-    for (const root of config.projectRoots) {
+  async autoDiscover(roots) {
+    const dirs = roots || config.projectRoots;
+    for (const root of dirs) {
       if (!existsSync(root)) continue;
       this.#scanDirectory(root, 0);
     }
@@ -87,11 +94,11 @@ export class ProjectRegistry {
     if (dir === config.dataDir.replace('/data', '') || dir.includes('localservices')) return;
 
     const hasServer = existsSync(join(dir, 'server.js')) || existsSync(join(dir, 'server.py'));
+    const hasPythonBackend = (existsSync(join(dir, 'main.py')) || existsSync(join(dir, 'app.py'))) && existsSync(join(dir, 'requirements.txt'));
     const hasFrontend = existsSync(join(dir, 'vite.config.js')) || existsSync(join(dir, 'vite.config.ts')) ||
       existsSync(join(dir, 'next.config.js')) || existsSync(join(dir, 'next.config.ts')) || existsSync(join(dir, 'next.config.mjs'));
-    const hasPackageJson = existsSync(join(dir, 'package.json'));
 
-    if (hasServer || hasFrontend) {
+    if (hasServer || hasPythonBackend || hasFrontend) {
       const id = this.#generateId(dir);
       if (!this.#projects.has(id)) {
         const project = this.#buildProject(dir, id);
@@ -243,7 +250,7 @@ function resolvePythonStartCommand(dir) {
   const candidates = ['app.py', 'main.py', 'server.py', 'manage.py'];
   for (const f of candidates) {
     if (existsSync(join(dir, f))) {
-      return { cmd: 'python', args: [f], cwd: dir };
+      return { cmd: 'python3', args: [f], cwd: dir };
     }
   }
   return null;
