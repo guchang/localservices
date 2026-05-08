@@ -1,0 +1,19 @@
+{
+  "name": "localservicehub",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.js",
+    "dev:web": "npm run dev --prefix web",
+    "dev:all": "concurrently \"node --watch server.js\" \"npm run dev --prefix web\"",
+    "build": "npm run build --prefix web && cp -r web/dist public",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
