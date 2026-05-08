@@ -1,32 +1,73 @@
 import { existsSync } from 'fs';
-import { resolve } from 'path';
-import { loadSettings, saveSettings } from '../settings.js';
+import { basename, isAbsolute, relative, resolve } from 'path';
 
-const SAFE_COMMANDS = new Set(['npm', 'npx', 'yarn', 'pnpm', 'bun', 'node', 'python', 'python3', 'deno']);
+const BLOCKED_COMMANDS = new Set(['bash', 'sh', 'zsh', 'fish', 'osascript']);
+const SAFE_GLOBAL_COMMANDS = new Set([
+  'npm', 'npx', 'yarn', 'pnpm', 'bun',
+  'node', 'deno',
+  'python', 'python3', 'uv', 'poetry', 'pipenv', 'uvicorn', 'flask', 'gunicorn',
+  'go',
+  'java', 'javac', 'mvn', 'gradle',
+  'cargo', 'rustc',
+  'dotnet',
+  'ruby', 'bundle', 'rails',
+  'php', 'composer',
+]);
+const UNSAFE_PROJECT_DIRS = new Set([
+  '/', '/bin', '/sbin', '/usr', '/usr/bin', '/usr/sbin',
+  '/System', '/Library', '/etc', '/var', '/private', '/tmp',
+]);
 
-function validateStartCommand(cmd) {
+function isInside(parent, child) {
+  const rel = relative(resolve(parent), resolve(child));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+function isPathLike(cmd) {
+  return cmd?.startsWith('/') || cmd?.startsWith('./') || cmd?.startsWith('../');
+}
+
+function isUnsafeProjectDir(projectDir) {
+  return UNSAFE_PROJECT_DIRS.has(resolve(projectDir));
+}
+
+function isProjectVenvPython(cmd, projectDir) {
+  if (!cmd?.startsWith('/')) return false;
+  const resolvedCmd = resolve(cmd);
+  return isInside(projectDir, resolvedCmd)
+    && resolvedCmd.includes('/.venv/bin/')
+    && /^python(\d+(\.\d+)?)?$/.test(basename(resolvedCmd));
+}
+
+function isProjectLocalCommand(cmd, projectDir) {
+  if (!isPathLike(cmd)) return false;
+  if (isUnsafeProjectDir(projectDir)) return false;
+  if (cmd.startsWith('/')) return isProjectVenvPython(cmd, projectDir);
+
+  const resolvedCmd = resolve(projectDir, cmd);
+  return isInside(projectDir, resolvedCmd);
+}
+
+function validateStartCommand(cmd, projectDir) {
   if (!cmd) return true;
   const cmds = Array.isArray(cmd) ? cmd : [cmd];
-  return cmds.every(c => SAFE_COMMANDS.has(c.cmd));
+  const absProjectDir = resolve(projectDir);
+
+  return cmds.every(c => {
+    if (!c?.cmd || typeof c.cmd !== 'string') return false;
+    if (c.args !== undefined && (!Array.isArray(c.args) || !c.args.every(arg => typeof arg === 'string'))) return false;
+    if (c.cwd !== undefined && typeof c.cwd !== 'string') return false;
+    if (BLOCKED_COMMANDS.has(basename(c.cmd))) return false;
+
+    const cwd = c.cwd ? resolve(c.cwd) : absProjectDir;
+    if (!isInside(absProjectDir, cwd)) return false;
+
+    if (SAFE_GLOBAL_COMMANDS.has(c.cmd)) return true;
+    return isProjectLocalCommand(c.cmd, absProjectDir);
+  });
 }
 
 export function registerRoutes(app, monitor, processManager) {
-  app.get('/api/settings', (req, res) => {
-    res.json(loadSettings());
-  });
-
-  app.post('/api/settings', async (req, res) => {
-    const { projectRoots } = req.body;
-    const settings = saveSettings({
-      projectRoots: projectRoots || [],
-      initialized: true,
-    });
-    const registry = monitor.getRegistry();
-    await registry.autoDiscover(settings.projectRoots);
-    const result = await monitor.triggerScan();
-    res.json({ settings, services: result });
-  });
-
   app.get('/api/services', (req, res) => {
     res.json(monitor.getServices());
   });
@@ -35,11 +76,6 @@ export function registerRoutes(app, monitor, processManager) {
     const data = monitor.getServices();
     data.services = data.services.filter(s => s.status === 'online');
     res.json(data);
-  });
-
-  app.post('/api/services/scan', async (req, res) => {
-    const result = await monitor.triggerScan();
-    res.json(result);
   });
 
   app.get('/api/projects', (req, res) => {
@@ -57,7 +93,7 @@ export function registerRoutes(app, monitor, processManager) {
     if (!existsSync(absDir)) {
       return res.status(400).json({ error: '项目目录不存在' });
     }
-    if (!validateStartCommand(startCommand)) {
+    if (!validateStartCommand(startCommand, absDir)) {
       return res.status(400).json({ error: '启动命令不在允许列表中' });
     }
     const id = absDir.split('/').filter(Boolean).pop().toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -71,24 +107,57 @@ export function registerRoutes(app, monitor, processManager) {
     res.json(project);
   });
 
-  app.delete('/api/projects/:id', (req, res) => {
+  app.post('/api/projects/register', async (req, res) => {
+    const { name, description, projectDir, startCommand, ports } = req.body;
+    if (!name || !projectDir || !startCommand) {
+      return res.status(400).json({ error: 'name, projectDir, startCommand 必填' });
+    }
+    const absDir = resolve(projectDir);
+    if (!existsSync(absDir)) {
+      return res.status(400).json({ error: '项目目录不存在' });
+    }
+    if (!validateStartCommand(startCommand, absDir)) {
+      return res.status(400).json({ error: '启动命令不在允许列表中' });
+    }
+    const registry = monitor.getRegistry();
+    const id = absDir.split('/').filter(Boolean).pop().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const project = registry.add({
+      id, name, projectDir: absDir,
+      description: description || '',
+      expectedPorts: ports || [],
+      framework: 'unknown',
+      startCommand,
+      autoDiscovered: false,
+    });
+    const services = monitor.refresh();
+    res.json({ success: true, project, services });
+  });
+
+  app.delete('/api/projects/:id', async (req, res) => {
     const registry = monitor.getRegistry();
     const removed = registry.remove(req.params.id);
-    res.json({ removed });
+    if (!removed) return res.status(404).json({ error: '项目不存在' });
+    const services = monitor.refresh();
+    res.json({ removed: true, services });
   });
 
   app.patch('/api/projects/:id', (req, res) => {
     const registry = monitor.getRegistry();
-    const updated = registry.update(req.params.id, req.body);
+    const existing = registry.get(req.params.id);
+    if (!existing) return res.status(404).json({ error: '项目不存在' });
+
+    const projectDir = req.body.projectDir ? resolve(req.body.projectDir) : existing.projectDir;
+    const updates = req.body.projectDir ? { ...req.body, projectDir } : req.body;
+    if (req.body.projectDir && !existsSync(projectDir)) {
+      return res.status(400).json({ error: '项目目录不存在' });
+    }
+    if (req.body.startCommand !== undefined && !validateStartCommand(req.body.startCommand, projectDir)) {
+      return res.status(400).json({ error: '启动命令不在允许列表中' });
+    }
+
+    const updated = registry.update(req.params.id, updates);
     if (!updated) return res.status(404).json({ error: '项目不存在' });
     res.json(updated);
-  });
-
-  app.post('/api/projects/discover', async (req, res) => {
-    const settings = loadSettings();
-    const registry = monitor.getRegistry();
-    await registry.autoDiscover(settings.projectRoots);
-    res.json(registry.getAll());
   });
 
   app.post('/api/services/:id/start', async (req, res) => {
@@ -101,6 +170,9 @@ export function registerRoutes(app, monitor, processManager) {
     const project = registry.get(req.params.id);
     if (!project?.startCommand) {
       return res.status(400).json({ error: '未配置启动命令' });
+    }
+    if (!validateStartCommand(project.startCommand, project.projectDir)) {
+      return res.status(400).json({ error: '启动命令不在允许列表中' });
     }
 
     try {
@@ -138,6 +210,9 @@ export function registerRoutes(app, monitor, processManager) {
 
     if (!project?.startCommand) {
       return res.status(400).json({ error: '未配置启动命令' });
+    }
+    if (!validateStartCommand(project.startCommand, project.projectDir)) {
+      return res.status(400).json({ error: '启动命令不在允许列表中' });
     }
 
     const pids = service?.status === 'online'

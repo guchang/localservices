@@ -17,7 +17,6 @@ export function scanPorts() {
     if (!portMatch) continue;
 
     const port = parseInt(portMatch[1]);
-    if (port === config.port) continue;
 
     const parts = line.split(/\s+/);
     const command = parts[0];

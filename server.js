@@ -20,6 +20,7 @@ const monitor = new ServiceMonitor(wss);
 await monitor.init();
 
 const processManager = new ProcessManager(monitor);
+monitor.setProcessManager(processManager);
 
 registerRoutes(app, monitor, processManager);
 

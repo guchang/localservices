@@ -1,17 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import ServiceCard from './ServiceCard.jsx';
 import RegisterModal from './RegisterModal.jsx';
-import SettingsModal from './SettingsModal.jsx';
+import RegisterPromptModal from './RegisterPromptModal.jsx';
 import { useWebSocket } from '../hooks/useWebSocket.js';
 
 export default function Dashboard() {
   const [services, setServices] = useState([]);
   const [summary, setSummary] = useState({ total: 0, online: 0, offline: 0 });
-  const [scanning, setScanning] = useState(false);
-  const [discovering, setDiscovering] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [initialized, setInitialized] = useState(null);
+  const [showPrompt, setShowPrompt] = useState(false);
 
   const wsUrl = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
   const { subscribe } = useWebSocket(wsUrl);
@@ -26,14 +23,6 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then(r => r.json())
-      .then(s => {
-        setInitialized(s.initialized === true);
-        if (!s.initialized) setShowSettings(true);
-      })
-      .catch(() => {});
-
     fetchServices();
     const unsub = subscribe((msg) => {
       if (msg.type === 'full_state') {
@@ -46,18 +35,6 @@ export default function Dashboard() {
     return unsub;
   }, [fetchServices, subscribe]);
 
-  const handleScan = async () => {
-    setScanning(true);
-    try {
-      const res = await fetch('/api/services/scan', { method: 'POST' });
-      const data = await res.json();
-      setServices(data.services || []);
-      setSummary(data.summary || { total: 0, online: 0, offline: 0 });
-    } finally {
-      setScanning(false);
-    }
-  };
-
   const handleRegister = async (project) => {
     const res = await fetch('/api/projects', {
       method: 'POST',
@@ -69,30 +46,6 @@ export default function Dashboard() {
       throw new Error(err.error || '注册失败');
     }
     fetchServices();
-  };
-
-  const handleDiscover = async () => {
-    setDiscovering(true);
-    try {
-      await fetch('/api/projects/discover', { method: 'POST' });
-      await fetchServices();
-    } finally {
-      setDiscovering(false);
-    }
-  };
-
-  const handleSaveSettings = async ({ projectRoots }) => {
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectRoots }),
-    });
-    if (!res.ok) throw new Error('保存设置失败');
-    const data = await res.json();
-    setInitialized(true);
-    setShowSettings(false);
-    setServices(data.services?.services || []);
-    setSummary(data.services?.summary || { total: 0, online: 0, offline: 0 });
   };
 
   const online = services.filter(s => s.status === 'online');
@@ -125,6 +78,17 @@ export default function Dashboard() {
     fetchServices();
   };
 
+  const handleDelete = async (serviceId) => {
+    const res = await fetch(`/api/projects/${serviceId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || '删除失败');
+    }
+    const data = await res.json();
+    setServices(data.services?.services || []);
+    setSummary(data.services?.summary || { total: 0, online: 0, offline: 0 });
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -136,14 +100,8 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="header-actions">
-          <button className="btn" onClick={() => setShowSettings(true)}>设置</button>
-          <button className="btn" onClick={handleDiscover} disabled={discovering}>
-            {discovering ? '发现中...' : '重新发现'}
-          </button>
-          <button className="btn" onClick={() => setShowRegister(true)}>注册项目</button>
-          <button className="btn primary" onClick={handleScan} disabled={scanning}>
-            {scanning ? '扫描中...' : '立即扫描'}
-          </button>
+          <button className="btn" onClick={() => setShowPrompt(true)}>注册提示词</button>
+          <button className="btn" onClick={() => setShowRegister(true)}>手动注册</button>
         </div>
       </header>
 
@@ -153,7 +111,7 @@ export default function Dashboard() {
         </div>
       )}
       <div className="grid">
-        {online.map(s => <ServiceCard key={s.id} service={s} onStop={handleStop} onRestart={handleRestart} />)}
+        {online.map(s => <ServiceCard key={s.id} service={s} onStop={handleStop} onRestart={handleRestart} onDelete={handleDelete} />)}
       </div>
 
       {offline.length > 0 && (
@@ -162,12 +120,12 @@ export default function Dashboard() {
         </div>
       )}
       <div className="grid">
-        {offline.map(s => <ServiceCard key={s.id} service={s} onStart={handleStart} onRestart={handleRestart} />)}
+        {offline.map(s => <ServiceCard key={s.id} service={s} onStart={handleStart} onRestart={handleRestart} onDelete={handleDelete} />)}
       </div>
 
       {services.length === 0 && (
         <div className="empty">
-          <p>未发现服务。点击「设置」配置扫描目录，或点击「注册项目」手动添加。</p>
+          <p>未发现服务。点击「注册提示词」或「手动注册」添加项目。</p>
         </div>
       )}
 
@@ -175,12 +133,8 @@ export default function Dashboard() {
         <RegisterModal onClose={() => setShowRegister(false)} onSubmit={handleRegister} />
       )}
 
-      {showSettings && (
-        <SettingsModal
-          onClose={() => { setShowSettings(false); setInitialized(true); }}
-          onSave={handleSaveSettings}
-          isOnboarding={initialized === false}
-        />
+      {showPrompt && (
+        <RegisterPromptModal onClose={() => setShowPrompt(false)} />
       )}
     </div>
   );

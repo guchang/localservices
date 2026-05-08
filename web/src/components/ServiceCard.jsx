@@ -6,7 +6,7 @@ const ROLE_LABELS = {
   unknown: '',
 };
 
-export default function ServiceCard({ service, onStart, onStop, onRestart }) {
+export default function ServiceCard({ service, onStart, onStop, onRestart, onDelete }) {
   const [copied, setCopied] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
   const [actionError, setActionError] = useState(null);
@@ -30,7 +30,22 @@ export default function ServiceCard({ service, onStart, onStop, onRestart }) {
 
   const isOnline = service.status === 'online';
   const isMultiPort = isOnline && service.ports?.length > 1;
+  const openPort = isMultiPort
+    ? service.ports.find(p => p.role === 'frontend')
+      || service.ports.find(p => p.role !== 'backend')
+      || service.ports[0]
+    : null;
   const hasStartCommand = !!service.startCommand;
+
+  const projectDir = service.projectDir;
+
+  const handleCopyDir = () => {
+    if (projectDir) {
+      navigator.clipboard.writeText(projectDir);
+      setCopied('dir');
+      setTimeout(() => setCopied(null), 1500);
+    }
+  };
 
   const handleCopy = (url, port) => {
     if (!url) return;
@@ -63,6 +78,18 @@ export default function ServiceCard({ service, onStart, onStop, onRestart }) {
         )}
       </div>
 
+      {service.description && (
+        <div className="card-description">{service.description}</div>
+      )}
+
+      {projectDir && (
+        <div className="card-dir" onClick={handleCopyDir} title="点击复制路径">
+          <span className="dir-icon">📁</span>
+          <span className="dir-path">{projectDir}</span>
+          {copied === 'dir' && <span className="dir-copied">已复制</span>}
+        </div>
+      )}
+
       {isMultiPort ? (
         <div className="card-ports">
           {service.ports.map(p => (
@@ -71,7 +98,6 @@ export default function ServiceCard({ service, onStart, onStop, onRestart }) {
                 {ROLE_LABELS[p.role] && (
                   <span className={`role-badge ${p.role}`}>{ROLE_LABELS[p.role]}</span>
                 )}
-                <span className="port-badge">:{p.port}</span>
                 {p.framework && p.framework !== 'unknown' && (
                   <span className="framework-badge small">{p.framework}</span>
                 )}
@@ -88,10 +114,6 @@ export default function ServiceCard({ service, onStart, onStop, onRestart }) {
       ) : (
         <>
           <div className="card-meta">
-            {isOnline && service.pid && <span>PID {service.pid}</span>}
-            {isOnline && service.port && (
-              <span className="port-badge">:{service.port}</span>
-            )}
             {!isOnline && service.expectedPorts?.length > 0 && (
               <span>预期端口: {service.expectedPorts.join(', ')}</span>
             )}
@@ -114,11 +136,11 @@ export default function ServiceCard({ service, onStart, onStop, onRestart }) {
         {isOnline ? (
           <>
             {isMultiPort ? (
-              service.ports.map(p => (
-                <a key={p.port} href={p.url} target="_blank" rel="noopener noreferrer" className="btn primary">
-                  {ROLE_LABELS[p.role] ? `${ROLE_LABELS[p.role]} :${p.port}` : `打开 :${p.port}`}
+              openPort?.url && (
+                <a href={openPort.url} target="_blank" rel="noopener noreferrer" className="btn primary">
+                  打开
                 </a>
-              ))
+              )
             ) : (
               service.url && (
                 <a href={service.url} target="_blank" rel="noopener noreferrer" className="btn primary">
@@ -144,6 +166,15 @@ export default function ServiceCard({ service, onStart, onStop, onRestart }) {
                 {actionLoading === 'restart' ? '重启中...' : '重启'}
               </button>
             )}
+            {onDelete && (
+              <button
+                className="btn delete"
+                disabled={actionLoading}
+                onClick={() => handleAction('delete', onDelete)}
+              >
+                {actionLoading === 'delete' ? '删除中...' : '删除'}
+              </button>
+            )}
           </>
         ) : (
           <>
@@ -163,6 +194,15 @@ export default function ServiceCard({ service, onStart, onStop, onRestart }) {
                 onClick={() => handleAction('restart', onRestart)}
               >
                 {actionLoading === 'restart' ? '重启中...' : '重启'}
+              </button>
+            )}
+            {onDelete && (
+              <button
+                className="btn delete"
+                disabled={actionLoading}
+                onClick={() => handleAction('delete', onDelete)}
+              >
+                {actionLoading === 'delete' ? '删除中...' : '删除'}
               </button>
             )}
           </>

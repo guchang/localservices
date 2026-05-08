@@ -3,3 +3,6 @@ data/
 web/node_modules/
 web/dist/
 .DS_Store
+.playwright-mcp/
+public/assets/
+public/dist/

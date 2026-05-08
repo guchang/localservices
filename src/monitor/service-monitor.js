@@ -2,7 +2,6 @@ import { EventEmitter } from 'events';
 import { WebSocketServer } from 'ws';
 import { ProjectRegistry } from '../matcher/project-registry.js';
 import { ProjectMatcher } from '../matcher/project-matcher.js';
-import { loadSettings } from '../settings.js';
 import config from '../../config.js';
 
 export class ServiceMonitor extends EventEmitter {
@@ -11,12 +10,17 @@ export class ServiceMonitor extends EventEmitter {
   #matcher;
   #intervalId = null;
   #currentServices = [];
+  #processManager = null;
 
   constructor(wss) {
     super();
     this.#wss = wss;
     this.#registry = new ProjectRegistry();
     this.#matcher = new ProjectMatcher(this.#registry);
+  }
+
+  setProcessManager(pm) {
+    this.#processManager = pm;
   }
 
   async init() {
@@ -58,16 +62,19 @@ export class ServiceMonitor extends EventEmitter {
     return this.#currentServices.find(s => s.id === id) || null;
   }
 
-  async triggerScan() {
-    const settings = loadSettings();
-    await this.#registry.autoDiscover(settings.projectRoots);
+  refresh() {
     this.#tick();
     return this.getServices();
   }
 
+  async triggerScan() {
+    this.#tick();
+  }
+
   #tick() {
     try {
-      const newServices = this.#matcher.match();
+      const spawnedByPid = this.#processManager?.getSpawnedByPid() || new Map();
+      const newServices = this.#matcher.match(spawnedByPid);
       const changes = this.#diffServices(this.#currentServices, newServices);
       this.#currentServices = newServices;
 

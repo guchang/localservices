@@ -14,14 +14,17 @@ function classifyRole(framework) {
 function normalizeCwd(cwd, projectDirs) {
   if (!cwd) return null;
   const parts = cwd.split('/');
+  // Walk up ancestor chain to find a registered projectDir
+  for (let i = parts.length; i >= 1; i--) {
+    const candidate = parts.slice(0, i).join('/');
+    if (projectDirs.has(candidate)) {
+      return candidate;
+    }
+  }
+  // Fallback: strip well-known subproject dir name
   const last = parts[parts.length - 1]?.toLowerCase();
   if (SUBPROJECT_DIRS.has(last)) {
     return parts.slice(0, -1).join('/');
-  }
-  // If CWD is a direct subdirectory of a known project, group with parent
-  const parent = parts.slice(0, -1).join('/');
-  if (projectDirs.has(parent)) {
-    return parent;
   }
   return cwd;
 }
@@ -37,7 +40,7 @@ export class ProjectMatcher {
     this.#registry = registry;
   }
 
-  match() {
+  match(spawnedByPid = new Map()) {
     const portMap = scanPorts();
     const pids = [...new Set([...portMap.values()].map(p => p.pid))];
     const processDetails = getBatchProcessDetails(pids);
@@ -48,10 +51,25 @@ export class ProjectMatcher {
       portEntries.push({ port, portInfo, details });
     }
 
+    // Build port→serviceId from spawned services' expectedPorts
+    const portToServiceId = new Map();
+    const spawnedServiceIds = new Set(spawnedByPid.values());
+    for (const serviceId of spawnedServiceIds) {
+      const project = this.#registry.get(serviceId);
+      if (project?.expectedPorts) {
+        for (const p of project.expectedPorts) {
+          portToServiceId.set(p, serviceId);
+        }
+      }
+    }
+
+    // Group: spawned services match by port; others by normalized cwd
     const groups = new Map();
     const projectDirs = new Set(this.#registry.getAll().map(p => p.projectDir));
     for (const entry of portEntries) {
-      const key = normalizeCwd(entry.details?.cwd, projectDirs) || `port-${entry.port}`;
+      const key = portToServiceId.get(entry.port)
+        || normalizeCwd(entry.details?.cwd, projectDirs)
+        || `port-${entry.port}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(entry);
     }
@@ -60,12 +78,8 @@ export class ProjectMatcher {
     const usedProjectIds = new Set();
 
     for (const [key, entries] of groups) {
-      for (const e of entries) {
-        const p = this.#matchProject(e.port, e.details);
-        if (p) usedProjectIds.add(p.id);
-      }
-
       const project = this.#findBestProject(key, entries);
+      if (project) usedProjectIds.add(project.id);
 
       if (entries.length === 1) {
         const e = entries[0];
@@ -80,6 +94,8 @@ export class ProjectMatcher {
           command: e.details?.command || null,
           framework: e.details?.framework || project?.framework || 'unknown',
           projectId: project?.id || null,
+          projectDir: project?.projectDir || e.details?.cwd || null,
+          description: project?.description || null,
           expectedPorts: project?.expectedPorts || [],
           startCommand: project?.startCommand || null,
         });
@@ -90,6 +106,8 @@ export class ProjectMatcher {
           status: 'online',
           framework: project?.framework || 'unknown',
           projectId: project?.id || null,
+          projectDir: project?.projectDir || key,
+          description: project?.description || null,
           expectedPorts: project?.expectedPorts || [],
           startCommand: project?.startCommand || null,
           ports: entries.map(e => ({
@@ -106,6 +124,7 @@ export class ProjectMatcher {
     }
 
     for (const project of this.#registry.getAll()) {
+      if (usedProjectIds.has(project.id)) continue;
       for (const key of groups.keys()) {
         if (key.startsWith(project.projectDir + '/')) {
           usedProjectIds.add(project.id);
@@ -129,6 +148,7 @@ export class ProjectMatcher {
           expectedPorts: project.expectedPorts,
           startCommand: project.startCommand || null,
           projectDir: project.projectDir,
+          description: project.description || null,
         });
       }
     }
@@ -145,6 +165,10 @@ export class ProjectMatcher {
   }
 
   #findBestProject(groupKey, entries) {
+    // If groupKey is a registered project ID (from spawnedByPid), return it directly
+    const directProject = this.#registry.get(groupKey);
+    if (directProject) return directProject;
+
     let best = null;
     for (const entry of entries) {
       const project = this.#matchProject(entry.port, entry.details);

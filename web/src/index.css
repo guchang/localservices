@@ -178,6 +178,53 @@ body { min-height: 100vh; }
   gap: 12px;
 }
 
+.card-description {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.card-dir {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+
+.card-dir:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
+}
+
+.dir-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.dir-path {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.dir-copied {
+  font-size: 11px;
+  color: var(--green);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .card-url {
   display: flex;
   align-items: center;
@@ -302,6 +349,13 @@ body { min-height: 100vh; }
 }
 .btn.restart:hover { background: rgba(167, 139, 250, 0.2); }
 
+.btn.delete {
+  background: rgba(120, 120, 120, 0.1);
+  border-color: var(--gray);
+  color: var(--gray);
+}
+.btn.delete:hover { background: rgba(248, 113, 113, 0.15); border-color: var(--red); color: var(--red); }
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -392,4 +446,27 @@ body { min-height: 100vh; }
   font-size: 12px;
   color: var(--text-dim);
   margin-bottom: 0;
+}
+
+.prompt-modal {
+  width: 640px;
+}
+
+.prompt-hint {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 12px;
+}
+
+.prompt-textarea {
+  width: 100%;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-bright);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
 }

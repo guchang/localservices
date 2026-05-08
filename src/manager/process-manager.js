@@ -67,6 +67,16 @@ export class ProcessManager {
     return this.#spawned.get(serviceId);
   }
 
+  getSpawnedByPid() {
+    const map = new Map();
+    for (const [serviceId, { pids }] of this.#spawned) {
+      for (const pid of pids) {
+        map.set(pid, serviceId);
+      }
+    }
+    return map;
+  }
+
   #killProcess(pid) {
     return new Promise((resolve) => {
       try {
