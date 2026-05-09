@@ -35,7 +35,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'full_state', data: monitor.getServices() }));
 });
 
-server.listen(config.port, () => {
+server.listen(config.port, '127.0.0.1', () => {
   console.log(`LocalServiceHub running at http://localhost:${config.port}`);
   monitor.start();
 });
